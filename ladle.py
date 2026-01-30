@@ -9,29 +9,38 @@ import os
 import time
 
 # ==========================================
-# 1. 页面基础配置
+# 1. 页面配置与字体管理
 # ==========================================
-st.set_page_config(page_title="冶金设备综合设计平台", layout="wide", page_icon="🏭")
+st.set_page_config(page_title="冶金设备综合计算平台", layout="wide", page_icon="🏭")
 
-# --- 解决字体 (高速缓存版) ---
+# --- 字体加载 (带自动诊断) ---
 @st.cache_resource
-def load_fonts():
-    try:
-        # 优先加载本地黑体
-        if os.path.exists("SimHei.ttf"):
-            fm.fontManager.addfont("SimHei.ttf")
-            return ['SimHei']
-        else:
-            # 备用字体
-            return ['SimHei', 'Microsoft YaHei', 'PingFang SC', 'Arial Unicode MS']
-    except:
-        return ['sans-serif']
+def configure_fonts():
+    # 优先寻找上传的字体文件
+    font_files = ["SimHei.ttf", "simhei.ttf"] 
+    found_font = None
+    for f in font_files:
+        if os.path.exists(f):
+            found_font = f
+            break
+    
+    if found_font:
+        fm.fontManager.addfont(found_font)
+        # 获取字体实际名称
+        prop = fm.FontProperties(fname=found_font)
+        return prop.get_name(), True
+    else:
+        # 没找到，使用备用列表
+        return "sans-serif", False
 
-plt.rcParams['font.sans-serif'] = load_fonts()
+font_family, is_font_success = configure_fonts()
+
+# 全局设置 Matplotlib
+plt.rcParams['font.sans-serif'] = [font_family, 'Microsoft YaHei', 'Arial Unicode MS', 'SimHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
 # ==========================================
-# 2. 用户登录模块
+# 2. 登录模块
 # ==========================================
 USERS = {
     "admin": "888888",
@@ -45,11 +54,17 @@ if 'user_name' not in st.session_state:
     st.session_state.user_name = ""
 
 def login_page():
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    st.markdown("<br><br>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 1.5, 1])
     with col2:
-        st.title("🔐 冶金设备综合设计平台")
-        st.info("集成了【矿热炉参数计算】与【铁水包设计】两大核心模块")
+        st.title("🔐 冶金设备综合计算平台")
+        
+        if is_font_success:
+            st.success(f"✅ 系统字体加载正常")
+        else:
+            st.warning("⚠️ 未检测到中文字体文件 (SimHei.ttf)，图表文字可能无法显示。")
+            
+        st.info("包含模块：1. 矿热电炉参数计算  2. 铁水包结构设计")
         
         with st.form("login_form"):
             username = st.text_input("用户名")
@@ -60,8 +75,6 @@ def login_page():
                 if username in USERS and USERS[username] == password:
                     st.session_state.logged_in = True
                     st.session_state.user_name = username
-                    st.success("登录成功！")
-                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.error("账号或密码错误")
@@ -71,145 +84,186 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ==========================================
-# 3. 侧边栏：模块切换与用户状态
+# 3. 主界面导航
 # ==========================================
 with st.sidebar:
-    st.header("🛠️ 功能导航")
-    app_mode = st.radio("选择设计模块:", ["🔥 矿热电炉参数设计", "🏭 铁水包/渣包设计"], index=0)
+    st.header("功能导航")
+    module = st.radio("选择设计模块:", ["🔥 矿热炉参数计算", "🏭 铁水包结构设计"], index=0)
     
     st.markdown("---")
-    st.write(f"👤 用户: **{st.session_state.user_name}**")
+    st.write(f"👤 操作员: **{st.session_state.user_name}**")
     if st.button("退出登录"):
         st.session_state.logged_in = False
         st.rerun()
 
 # ==========================================
-# 4. 模块一：矿热电炉参数设计 (新功能)
+# 4. 模块一：矿热炉参数计算 (Excel逻辑复刻)
 # ==========================================
-if app_mode == "🔥 矿热电炉参数设计":
-    st.title("🔥 矿热电炉参数计算平台")
-    st.markdown("基于 **变压器容量立方根 ($P^{1/3}$)** 的经验系数法")
-    
-    # --- A. 基础数据字典 (从您Excel提取) ---
-    ALLOY_DATA = {
-        "硅锰 (SiMn)":    {"Ke": (6.2, 6.6, 6.2), "J": (5.5, 7.0, 5.5), "Ky": (2.5, 3.0, 2.8), "Ki": (6.3, 6.5, 6.5), "Kh": (2.4, 2.8, 2.7)},
-        "高碳铬铁 (FeCr)": {"Ke": (6.0, 7.0, 6.8), "J": (5.5, 6.5, 5.7), "Ky": (2.5, 2.7, 2.65), "Ki": (6.3, 6.5, 6.3), "Kh": (2.5, 2.8, 2.5)},
-        "镍铁 (FeNi-RKEF)":{"Ke": (11.0, 13.0, 12.0), "J": (3.0, 5.0, 4.0), "Ky": (3.3, 3.8, 3.7), "Ki": (10.0, 11.0, 10.0), "Kh": (2.8, 3.1, 2.9)},
-        "硅铁75 (FeSi75)": {"Ke": (6.0, 7.5, 6.8), "J": (6.0, 7.0, 6.5), "Ky": (2.2, 2.3, 2.25), "Ki": (5.5, 6.2, 5.8), "Kh": (2.1, 2.4, 2.2)},
-        "电石 (CaC2)":     {"Ke": (6.0, 7.0, 6.5), "J": (6.5, 7.5, 7.0), "Ky": (2.6, 2.8, 2.7), "Ki": (6.3, 6.5, 6.4), "Kh": (2.1, 2.3, 2.2)},
-        "工业硅 (Si)":     {"Ke": (7.0, 8.0, 7.5), "J": (5.0, 7.0, 6.0), "Ky": (2.2, 2.6, 2.4), "Ki": (5.5, 6.5, 6.0), "Kh": (2.1, 2.5, 2.3)},
-        "自定义":          {"Ke": (1.0, 20.0, 6.5), "J": (1.0, 10.0, 5.5), "Ky": (1.0, 5.0, 2.7), "Ki": (1.0, 15.0, 6.5), "Kh": (1.0, 5.0, 2.5)}
+if module == "🔥 矿热炉参数计算":
+    st.title("🔥 矿热电炉参数计算器")
+    st.markdown("基于 **容量立方根 ($P^{1/3}$)** 的经验系数法，集成一次侧供电参数。")
+
+    # --- A. 内置数据字典 (源自您的Excel文件) ---
+    # 格式: [Ke范围, J范围, Ky范围, Ki范围, Kh范围] -> 默认值取中间
+    ALLOY_DB = {
+        "硅锰 (SiMn)":     {"Ke": 6.3,  "J": 5.5, "Ky": 2.7,  "Ki": 6.4,  "Kh": 2.5, "range_Ke": (6.2, 6.6)},
+        "高碳铬铁 (FeCr)": {"Ke": 6.8,  "J": 5.7, "Ky": 2.65, "Ki": 6.3,  "Kh": 2.6, "range_Ke": (6.0, 7.0)},
+        "镍铁 (FeNi-RKEF)":{"Ke": 12.0, "J": 4.0, "Ky": 3.6,  "Ki": 10.0, "Kh": 2.9, "range_Ke": (11.0, 13.0)},
+        "硅铁75 (FeSi75)": {"Ke": 6.8,  "J": 6.5, "Ky": 2.25, "Ki": 5.8,  "Kh": 2.2, "range_Ke": (6.0, 7.5)},
+        "电石 (CaC2)":     {"Ke": 6.5,  "J": 7.0, "Ky": 2.7,  "Ki": 6.4,  "Kh": 2.2, "range_Ke": (6.0, 7.0)},
+        "工业硅 (Si)":     {"Ke": 7.5,  "J": 6.0, "Ky": 2.4,  "Ki": 6.0,  "Kh": 2.3, "range_Ke": (7.0, 8.0)},
+        "自定义":          {"Ke": 6.5,  "J": 5.5, "Ky": 2.7,  "Ki": 6.5,  "Kh": 2.5, "range_Ke": (1.0, 20.0)}
     }
 
-    # --- B. 输入区域 ---
-    col_input, col_param = st.columns([1, 2])
-    
-    with col_input:
-        st.subheader("1. 基础输入")
-        alloy_type = st.selectbox("选择冶炼品种", list(ALLOY_DATA.keys()))
-        capacity_mva = st.number_input("变压器容量 (MVA)", min_value=0.1, value=33.0, step=0.5)
-        # 转换为KVA
-        capacity_kva = capacity_mva * 1000
-        
-        # 获取默认范围
-        defaults = ALLOY_DATA[alloy_type]
-        
-        st.subheader("2. 经验系数调整")
-        ke = st.slider(f"电压系数 Ke ({defaults['Ke'][0]}-{defaults['Ke'][1]})", 
-                       min_value=0.0, max_value=20.0, value=defaults['Ke'][2], step=0.1)
-        j_den = st.slider(f"电流密度 J ({defaults['J'][0]}-{defaults['J'][1]}) A/cm²", 
-                          min_value=0.1, max_value=15.0, value=defaults['J'][2], step=0.1)
-        ky = st.slider(f"极心圆系数 Ky ({defaults['Ky'][0]}-{defaults['Ky'][1]})", 
-                       min_value=1.0, max_value=5.0, value=defaults['Ky'][2], step=0.05)
-        ki = st.slider(f"炉膛内径系数 Ki ({defaults['Ki'][0]}-{defaults['Ki'][1]})", 
-                       min_value=1.0, max_value=20.0, value=defaults['Ki'][2], step=0.1)
-        kh = st.slider(f"炉膛深度系数 Kh ({defaults['Kh'][0]}-{defaults['Kh'][1]})", 
-                       min_value=1.0, max_value=10.0, value=defaults['Kh'][2], step=0.1)
+    col1, col2 = st.columns([1, 2])
 
-    # --- C. 计算逻辑 ---
-    # 1. 二次电压 U2 = Ke * (P_kva)^(1/3)
-    u2 = ke * (capacity_kva ** (1/3))
+    with col1:
+        st.subheader("1. 供电与容量设定")
+        alloy = st.selectbox("冶炼品种", list(ALLOY_DB.keys()))
+        
+        # 新增：一次侧参数输入
+        c1_in, c2_in = st.columns(2)
+        with c1_in:
+            capacity_mva = st.number_input("变压器容量 (MVA)", value=33.0, step=0.5, min_value=1.0)
+        with c2_in:
+            # 提供常用电压选择，也允许手填
+            u1_kv = st.selectbox("一次电压 U₁ (kV)", [110, 35, 10, 6, 220, 10.5], index=1, help="高压侧供电电压")
+        
+        # 自动加载默认系数
+        defaults = ALLOY_DB[alloy]
+        st.markdown("---")
+        st.caption("🔍 经验系数微调")
+        
+        ke = st.slider(f"电压系数 Ke", min_value=1.0, max_value=20.0, value=defaults['Ke'], step=0.1, help="决定二次电压高低，硅锰约6.3，镍铁约12")
+        j_val = st.slider(f"电流密度 J (A/cm²)", min_value=1.0, max_value=10.0, value=defaults['J'], step=0.1)
+        ky = st.number_input(f"极心圆系数 Ky", value=defaults['Ky'], step=0.05)
+        ki = st.number_input(f"炉膛内径系数 Ki", value=defaults['Ki'], step=0.1)
+        kh = st.number_input(f"炉膛深度系数 Kh", value=defaults['Kh'], step=0.1)
+        
+        # 额外输入：炉衬厚度 (用于估算外壳)
+        lining_thick = st.number_input("平均炉衬厚度 (mm)", value=1200, step=100, help="用于估算炉壳尺寸")
+
+    # --- B. 核心计算 ---
+    # 1. 变压器容量 kVA
+    p_kva = capacity_mva * 1000
     
-    # 2. 二次电流 I2 = P / (sqrt(3) * U2)
-    i2 = capacity_kva * 1000 / (1.732 * u2)
+    # 2. 一次电流 I1 (A) = P / (sqrt(3) * U1)
+    # U1 单位转换成 V: u1_kv * 1000
+    i1 = (p_kva * 1000) / (1.73205 * (u1_kv * 1000))
     
-    # 3. 电极直径 de (cm) = sqrt( I2 / (0.785 * J) )
-    de_cm = np.sqrt(i2 / (0.785 * j_den))
+    # 3. 二次电压 U2 = Ke * (P^1/3)
+    u2 = ke * (p_kva ** (1/3))
+    
+    # 4. 二次电流 I2 = P / (sqrt(3) * U2)
+    i2 = p_kva * 1000 / (1.73205 * u2)
+    
+    # 5. 电极直径 d = sqrt( I2 / (0.7854 * J) )
+    # 先算面积 cm2
+    elec_area_cm2 = i2 / j_val
+    de_cm = np.sqrt(elec_area_cm2 / 0.7854)
     de_mm = de_cm * 10
     
-    # 4. 几何参数 (mm)
-    dc_mm = ky * de_mm
-    di_mm = ki * de_mm
-    hh_mm = kh * de_mm
+    # 6. 炉体尺寸
+    dc_mm = ky * de_mm  # 极心圆
+    di_mm = ki * de_mm  # 炉膛内径
+    hh_mm = kh * de_mm  # 炉膛深度
     
-    # --- D. 结果展示 ---
-    with col_param:
-        st.subheader("3. 计算结果")
+    # 7. 估算炉壳
+    shell_id_mm = di_mm + 2 * lining_thick
+    shell_h_mm = hh_mm + 2000 # 估算高度：深度+炉底+超高
+
+    with col2:
+        st.subheader("2. 计算结果分析")
         
-        # 核心指标卡片
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("二次电压 U2", f"{u2:.1f} V")
-        c2.metric("二次电流 I2", f"{i2/1000:.1f} kA")
-        c3.metric("电极直径", f"{de_mm:.0f} mm")
-        c4.metric("极心圆直径", f"{dc_mm:.0f} mm")
+        # 关键指标展示 (第一行：一次侧)
+        st.markdown("**⚡ 一次侧参数 (High Voltage)**")
+        k1_1, k1_2, k1_3 = st.columns(3)
+        k1_1.metric("变压器容量", f"{capacity_mva} MVA")
+        k1_2.metric("一次电压 U₁", f"{u1_kv} kV")
+        k1_3.metric("一次电流 I₁", f"{i1:.1f} A")
         
-        # 详细数据表
-        res_data = [
-            {"参数项目": "变压器容量", "数值": f"{capacity_mva}", "单位": "MVA"},
-            {"参数项目": "二次电压 U2", "数值": f"{u2:.2f}", "单位": "V"},
-            {"参数项目": "二次电流 I2", "数值": f"{i2:.1f}", "单位": "A"},
-            {"参数项目": "电极直径 De", "数值": f"{de_mm:.1f}", "单位": "mm"},
-            {"参数项目": "极心圆直径 Dc", "数值": f"{dc_mm:.1f}", "单位": "mm"},
-            {"参数项目": "炉膛内径 Di", "数值": f"{di_mm:.1f}", "单位": "mm"},
-            {"参数项目": "炉膛深度 Hh", "数值": f"{hh_mm:.1f}", "单位": "mm"},
-            {"参数项目": "计算电流密度", "数值": f"{j_den:.2f}", "单位": "A/cm²"},
-        ]
-        df_res = pd.DataFrame(res_data)
-        st.dataframe(df_res, hide_index=True, use_container_width=True)
+        st.divider()
         
-        # 下载按钮
-        csv = df_res.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 下载计算书 (CSV)", csv, f"矿热炉参数_{alloy_type}_{capacity_mva}MVA.csv", "text/csv")
+        # 关键指标展示 (第二行：二次侧)
+        st.markdown("**🔥 二次侧与炉体 (Furnace)**")
+        k2_1, k2_2, k2_3, k2_4 = st.columns(4)
+        k2_1.metric("二次电压 U₂", f"{u2:.1f} V")
+        k2_2.metric("二次电流 I₂", f"{i2/1000:.1f} kA")
+        k2_3.metric("电极直径 d", f"{de_mm:.0f} mm")
+        k2_4.metric("极心圆直径", f"{dc_mm:.0f} mm")
         
-        # 简单的示意图
-        st.markdown("#### 📏 炉膛尺寸示意")
-        fig, ax = plt.subplots(figsize=(8, 4))
-        # 画炉壳(简化)
-        shell_w = di_mm * 1.2
-        shell_h = hh_mm * 1.5
-        rect = patches.Rectangle((-shell_w/2, 0), shell_w, shell_h, linewidth=2, edgecolor='black', facecolor='none', label='炉壳')
-        ax.add_patch(rect)
-        # 画炉膛
-        hearth = patches.Rectangle((-di_mm/2, shell_h*0.1), di_mm, hh_mm, linewidth=1, edgecolor='red', facecolor='orange', alpha=0.3, label='炉膛')
-        ax.add_patch(hearth)
+        st.info(f"💡 根据 **{alloy}** 经验系数计算：该容量下的炉膛内径约为 **{di_mm/1000:.1f}米**，建议炉壳内径 **{shell_id_mm/1000:.1f}米**。")
+
+        # 绘图
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # 画炉壳
+        rect_shell = patches.Rectangle((-shell_id_mm/2, 0), shell_id_mm, shell_h_mm, linewidth=3, edgecolor='#333333', facecolor='none', label='炉壳')
+        ax.add_patch(rect_shell)
+        
+        # 画炉膛 (假设炉底厚度1500)
+        bottom_thick = 1500
+        rect_hearth = patches.Rectangle((-di_mm/2, bottom_thick), di_mm, hh_mm, linewidth=2, edgecolor='red', facecolor='#FFD700', alpha=0.3, label='炉膛(熔池)')
+        ax.add_patch(rect_hearth)
+        
+        # 画电极 (画两根示意)
+        elec_w = de_mm
+        elec_h = shell_h_mm * 0.8
+        # 左电极 (极心圆位置 -dc/2)
+        rect_el1 = patches.Rectangle((-dc_mm/2 - elec_w/2, shell_h_mm/2), elec_w, elec_h, color='#555555', label='电极')
+        ax.add_patch(rect_el1)
+        # 右电极
+        rect_el2 = patches.Rectangle((dc_mm/2 - elec_w/2, shell_h_mm/2), elec_w, elec_h, color='#555555')
+        ax.add_patch(rect_el2)
+        
         # 标注
-        ax.annotate(f"炉膛内径 {di_mm:.0f}", xy=(0, shell_h*0.1+hh_mm), xytext=(0, shell_h+500), arrowprops=dict(arrowstyle='<->'), ha='center')
-        ax.annotate(f"深度 {hh_mm:.0f}", xy=(-di_mm/2, shell_h*0.1+hh_mm/2), xytext=(-shell_w/2-500, shell_h*0.1+hh_mm/2), arrowprops=dict(arrowstyle='<->'), va='center')
+        bbox_props = dict(boxstyle="square,pad=0.3", fc="white", ec="black", lw=0.5, alpha=0.8)
         
-        ax.set_xlim(-shell_w/1.5, shell_w/1.5)
-        ax.set_ylim(-1000, shell_h + 1000)
+        # 标注内径
+        ax.annotate(f"炉膛内径 {di_mm:.0f}", xy=(0, bottom_thick + hh_mm/2), ha='center', fontsize=12, bbox=bbox_props)
+        # 标注极心圆
+        ax.annotate(f"极心圆 {dc_mm:.0f}", xy=(0, shell_h_mm - 500), xytext=(0, shell_h_mm + 500), 
+                    arrowprops=dict(arrowstyle='-'), ha='center', color='blue', fontsize=12, bbox=bbox_props)
+        ax.plot([-dc_mm/2, dc_mm/2], [shell_h_mm + 200, shell_h_mm + 200], color='blue', marker='|')
+
         ax.set_aspect('equal')
-        ax.axis('off')
+        ax.axis('off') # 不显示坐标轴
+        ax.set_title(f"{capacity_mva}MVA {alloy}矿热炉 结构示意图", fontsize=14)
         plt.legend(loc='upper right')
         st.pyplot(fig)
-
+        
+        # 导出表格
+        res_data = [
+            {"参数名称": "变压器容量", "数值": capacity_mva, "单位": "MVA"},
+            {"参数名称": "一次电压 U1", "数值": u1_kv, "单位": "kV"},
+            {"参数名称": "一次电流 I1", "数值": round(i1, 1), "单位": "A"},
+            {"参数名称": "二次电压 U2", "数值": round(u2, 1), "单位": "V"},
+            {"参数名称": "二次电流 I2", "数值": round(i2, 1), "单位": "A"},
+            {"参数名称": "电极直径 d", "数值": round(de_mm, 0), "单位": "mm"},
+            {"参数名称": "极心圆直径 Dc", "数值": round(dc_mm, 0), "单位": "mm"},
+            {"参数名称": "炉膛内径 Di", "数值": round(di_mm, 0), "单位": "mm"},
+            {"参数名称": "炉膛深度 Hh", "数值": round(hh_mm, 0), "单位": "mm"},
+            {"参数名称": "电流密度 J", "数值": j_val, "单位": "A/cm²"},
+            {"参数名称": "电压系数 Ke", "数值": ke, "单位": "-"},
+        ]
+        df_res = pd.DataFrame(res_data)
+        csv = df_res.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📊 下载计算书 (CSV)", csv, f"矿热炉参数_{capacity_mva}MVA.csv")
 
 # ==========================================
-# 5. 模块二：铁水包/渣包设计 (保留原功能)
+# 5. 模块二：铁水包设计 (原有功能)
 # ==========================================
-elif app_mode == "🏭 铁水包/渣包设计":
+elif module == "🏭 铁水包结构设计":
     
-    # --- 状态同步 ---
+    # [这里完全保留您之前的铁水包代码逻辑]
     if 'aspect_ratio' not in st.session_state:
         st.session_state.aspect_ratio = 1.01
 
     def update_slider():
         st.session_state.aspect_ratio = st.session_state.slider_val
-
     def update_input():
         st.session_state.aspect_ratio = st.session_state.input_val
 
-    # --- 核心：智能求解器 ---
     def solve_ladle_geometry(target_vol_m3, density, t_wall_mm, t_bottom_mm, freeboard_mm, angle_degree, aspect_ratio):
         t_w = t_wall_mm / 1000.0
         t_b = t_bottom_mm / 1000.0
@@ -238,7 +292,7 @@ elif app_mode == "🏭 铁水包/渣包设计":
             vol_calc = calculate_capacity_by_H(mid)
             if vol_calc < target_vol_m3: low = mid 
             else: high = mid 
-                
+        
         best_H = (low + high) / 2
         H = best_H
         H_mm = H * 1000
@@ -272,7 +326,6 @@ elif app_mode == "🏭 铁水包/渣包设计":
             "aspect_ratio": aspect_ratio
         }
 
-    # --- 绘图函数 ---
     def plot_ladle_diagram(params):
         H = params['H_total']
         D_top = params['Dia_top_out']
@@ -300,22 +353,18 @@ elif app_mode == "🏭 铁水包/渣包设计":
         liq_y = [t_b, t_b, level_y, level_y]
         ax.add_patch(patches.Polygon(xy=list(zip(liq_x, liq_y)), closed=True, facecolor='#FFA500', alpha=0.7))
         ax.add_patch(patches.Polygon(xy=list(zip([-x for x in liq_x], liq_y)), closed=True, facecolor='#FFA500', alpha=0.7))
-
         bbox_white = dict(boxstyle='square,pad=0.2', fc='white', ec='none', alpha=0.9)
         anno_x = -R_top * 1.3
         ax.annotate("", xy=(anno_x, 0), xytext=(anno_x, H), arrowprops=dict(arrowstyle='<->', lw=1.5, color='black'))
         ax.plot([anno_x-100, anno_x+100], [0, 0], 'k-', lw=1)
         ax.plot([anno_x-100, anno_x+100], [H, H], 'k-', lw=1)
         ax.text(anno_x - 150, H/2, f"H={H:.0f}", va='center', ha='right', fontsize=14, fontweight='bold')
-        
         ax.annotate("", xy=(0, t_b), xytext=(0, level_y), arrowprops=dict(arrowstyle='<->', lw=1.5, color='red'))
         ax.text(0, level_y/2 + t_b, f"液深\n{h_liq:.0f}", ha='center', va='center', color='red', fontsize=11, fontweight='bold', bbox=bbox_white)
-        
         freeboard = params['freeboard']
         fb_x = r_surf * 0.6 
         ax.annotate("", xy=(fb_x, level_y), xytext=(fb_x, H), arrowprops=dict(arrowstyle='<->', lw=1.5, color='red'))
         ax.text(fb_x, (level_y + H)/2, f"净空\n{freeboard:.0f}", ha='center', va='center', color='red', fontsize=10, bbox=bbox_white)
-        
         ax.annotate(f"Ф{D_top:.0f}", xy=(0, H), xytext=(0, H + 350), arrowprops=dict(arrowstyle='-', color='gray'), ha='center', fontsize=12, fontweight='bold', bbox=bbox_white)
         ax.annotate("", xy=(-R_top, H+250), xytext=(R_top, H+250), arrowprops=dict(arrowstyle='<|-|>', lw=1.5))
         ax.annotate(f"Ф{D_bot:.0f}", xy=(0, 0), xytext=(0, -350), arrowprops=dict(arrowstyle='-', color='gray'), ha='center', va='top', fontsize=12, fontweight='bold', bbox=bbox_white)
@@ -330,11 +379,7 @@ elif app_mode == "🏭 铁水包/渣包设计":
         plt.grid(True, linestyle='--', alpha=0.3)
         return fig
 
-    # --- 主程序 ---
-    st.title("🏭 铁水包/渣罐 设计工具")
-    
     col_input, col_display = st.columns([1, 2.5])
-
     with col_input:
         st.subheader("1. 基础与形状")
         input_volume = st.number_input("目标有效容积 (m³)", min_value=0.1, value=4.5, step=0.1)
@@ -344,7 +389,6 @@ elif app_mode == "🏭 铁水包/渣包设计":
         col_slide, col_text = st.columns([2, 1])
         with col_slide: st.slider("粗调", 0.5, 2.5, key='slider_val', on_change=update_slider)
         with col_text: st.number_input("精调", 0.5, 2.5, step=0.01, key='input_val', on_change=update_input)
-        st.caption(f"当前生效值: {st.session_state.aspect_ratio}")
         st.markdown("---")
         st.subheader("2. 结构参数 (mm)")
         input_freeboard = st.number_input("净空高度 (液面到顶部)", value=300, step=50)
@@ -363,19 +407,14 @@ elif app_mode == "🏭 铁水包/渣包设计":
             c2.metric("计算载重", f"{data['capacity_ton']} t")
             c3.metric("上口外径", f"{data['Dia_top_out']:.0f} mm")
             c4.metric("净空高度", f"{data['freeboard']:.0f} mm")
-            
             fig = plot_ladle_diagram(data)
             st.pyplot(fig)
-            
-            # --- 下载功能区 ---
             st.markdown("### 📥 导出设计")
             col_down1, col_down2 = st.columns(2)
-            
             buf = BytesIO()
             fig.savefig(buf, format="png", dpi=150)
             with col_down1:
                 st.download_button("📷 下载设计图纸 (PNG)", data=buf.getvalue(), file_name=f"铁水包图纸_{data['volume_m3']}m3.png", mime="image/png")
-
             spec_data = [
                 {"类别": "几何尺寸", "名称": "总高度 (H)", "数值": f"{data['H_total']:.0f}", "单位": "mm"},
                 {"类别": "几何尺寸", "名称": "上口外径", "数值": f"{data['Dia_top_out']:.0f}", "单位": "mm"},
@@ -392,5 +431,4 @@ elif app_mode == "🏭 铁水包/渣包设计":
             csv = df_spec.to_csv(index=False).encode('utf-8-sig')
             with col_down2:
                 st.download_button("📊 下载规格书 (Excel/CSV)", data=csv, file_name=f"铁水包参数_{data['volume_m3']}m3.csv", mime="text/csv")
-
             st.dataframe(df_spec, hide_index=True, use_container_width=True, column_order=["类别", "名称", "数值", "单位"])
