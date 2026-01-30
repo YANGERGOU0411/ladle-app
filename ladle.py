@@ -101,14 +101,16 @@ with st.sidebar:
 
     st.subheader("1. 容量设定")
     input_volume = st.number_input("目标有效容积 (m³)", 0.1, 50.0, 4.5, 0.1)
-    input_density = st.number_input("介质密度 (t/m³)", 1.0, 10.0, 7.0, 0.1)
+    # 修改点：默认密度改为 2.8
+    input_density = st.number_input("介质密度 (t/m³)", 1.0, 10.0, 2.8, 0.1)
 
     st.subheader("2. 形状控制 (D/H)")
     st.slider("粗调比例", 0.5, 2.5, key='slider_val', value=st.session_state.aspect_ratio, on_change=update_from_slider)
     st.number_input("精调数值", 0.5, 2.5, key='input_val', value=st.session_state.aspect_ratio, step=0.01, on_change=update_from_input)
     
     st.subheader("3. 结构细节 (mm)")
-    input_freeboard = st.number_input("净空高度 (液面到顶)", value=300, step=50)
+    # 修改点：默认净空改为 150
+    input_freeboard = st.number_input("净空高度 (液面到顶)", value=150, step=50)
     input_angle = st.number_input("侧壁倾角 (°)", value=5.0, step=0.5)
     input_wall_thick = st.number_input("侧壁总厚度", value=160, step=10)
     input_bottom_thick = st.number_input("底部总厚度", value=230, step=10)
@@ -144,28 +146,13 @@ def solve_ladle(target_vol, density, t_wall, t_bot, freeboard, angle, ar):
     D_bot = D_top - 2 * H_mm * tan_a
     h_liq = H_mm - t_bot - freeboard
     
-    # --- 重心计算 (圆台重心公式) ---
-    # 铁水液面的上半径和下半径
-    r_liq_top = (D_top/2 - freeboard * tan_a) - t_wall
-    r_liq_bot = (D_bot/2 + t_bot * tan_a) - t_wall
-    
-    # 铁水部分高度 h_liq
-    h = h_liq
-    R = r_liq_top
-    r = r_liq_bot
-    
-    if r > 0 and h > 0:
-        # 重心相对于液柱底面的高度
-        z_liq_local = (h * (R**2 + 2*R*r + 3*r**2)) / (4 * (R**2 + R*r + r**2))
-        # 绝对重心高度 (相对于包底)
-        z_cog = input_bottom_thick + z_liq_local
-    else:
-        z_cog = 0
+    # 耳轴高度估算 (通常位于总高 0.6-0.65 处，保证倾翻稳定性)
+    trunnion_h = H_mm * 0.65
 
     return {
         "H": H_mm, "Dt": D_top, "Db": D_bot, "hl": h_liq,
         "cap": target_vol * density, "vol": target_vol,
-        "z_cog": z_cog
+        "z_trunnion": trunnion_h
     }
 
 res = solve_ladle(input_volume, input_density, input_wall_thick, input_bottom_thick, input_freeboard, input_angle, st.session_state.aspect_ratio)
@@ -185,7 +172,7 @@ with c1:
     k2.metric("上口外径", f"{res['Dt']:.0f} mm")
     k3, k4 = st.columns(2)
     k3.metric("计算载重", f"{res['cap']:.2f} t")
-    k4.metric("铁水重心高度", f"{res['z_cog']:.0f} mm")
+    k4.metric("耳轴建议高度", f"{res['z_trunnion']:.0f} mm")
     
     st.markdown("#### 📥 导出数据")
     df = pd.DataFrame([
@@ -195,7 +182,7 @@ with c1:
         ["有效容积", f"{res['vol']:.2f}", "m³"],
         ["计算载重", f"{res['cap']:.2f}", "t"],
         ["有效容深度", f"{res['hl']:.0f}", "mm"],
-        ["铁水重心高度", f"{res['z_cog']:.0f}", "mm"],
+        ["耳轴高度 (EL)", f"{res['z_trunnion']:.0f}", "mm"],
         ["侧壁厚度", f"{input_wall_thick}", "mm"],
         ["底部厚度", f"{input_bottom_thick}", "mm"],
         ["侧壁倾角", f"{input_angle}", "°"],
@@ -211,7 +198,7 @@ with c2:
     H, Dt, Db = res['H'], res['Dt'], res['Db']
     hf = input_freeboard
     tw, tb = input_wall_thick, input_bottom_thick
-    z_cog = res['z_cog']
+    z_trunnion = res['z_trunnion']
     
     fig, ax = plt.subplots(figsize=(10, 8))
     
@@ -256,16 +243,16 @@ with c2:
     ax.plot([-Dt/2, -Dt/2], [H, H+250], **ext_line_style)
     ax.plot([Dt/2, Dt/2], [H, H+250], **ext_line_style)
 
-    # 2. 链式对齐标注 (右侧) --- 您的核心需求
+    # 2. 链式对齐标注 (右侧) --- 完美对齐
     dim_x = Dt/2 + 300 # 统一标注线位置
     
     # (1) 底厚
     ax.annotate("", xy=(dim_x, 0), xytext=(dim_x, tb), arrowprops=arrow_style)
     ax.text(dim_x + 50, tb/2, f"底厚 {tb:.0f}", va='center', ha='left', fontsize=10)
     ax.plot([Dt/2, dim_x], [0, 0], **ext_line_style)
-    ax.plot([Db/2, dim_x], [tb, tb], **ext_line_style) # 引出线
+    ax.plot([Db/2, dim_x], [tb, tb], **ext_line_style)
     
-    # (2) 有效容深度
+    # (2) 有效容深度 (改名)
     ax.annotate("", xy=(dim_x, tb), xytext=(dim_x, tb+h_l), arrowprops=arrow_style)
     ax.text(dim_x + 50, tb + h_l/2, f"有效容深度 {h_l:.0f}", va='center', ha='left', fontsize=10, fontweight='bold', color='#D32F2F')
     ax.plot([r_liq_t, dim_x], [tb+h_l, tb+h_l], **ext_line_style)
@@ -275,11 +262,10 @@ with c2:
     ax.text(dim_x + 50, tb+h_l + hf/2, f"净空 {hf:.0f}", va='center', ha='left', fontsize=10, color='blue')
     ax.plot([Dt/2, dim_x], [H, H], **ext_line_style)
 
-    # 3. 重心标注 (COG)
-    if z_cog > 0:
-        ax.plot(0, z_cog, marker='$\oplus$', markersize=15, color='blue') # 重心符号
-        ax.annotate(f"重心 H={z_cog:.0f}", xy=(0, z_cog), xytext=(-Dt/3, z_cog), 
-                    arrowprops=dict(arrowstyle='->', color='blue'), color='blue', fontweight='bold', bbox=bbox_style)
+    # 3. 耳轴位置标注 (Trunnion)
+    ax.plot(0, z_trunnion, marker='$\oplus$', markersize=15, color='blue') # 耳轴符号
+    ax.annotate(f"耳轴中心 H={z_trunnion:.0f}", xy=(0, z_trunnion), xytext=(-Dt/3, z_trunnion), 
+                arrowprops=dict(arrowstyle='->', color='blue'), color='blue', fontweight='bold', bbox=bbox_style)
 
     ax.set_aspect('equal')
     ax.axis('off')
