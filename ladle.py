@@ -101,7 +101,7 @@ with st.sidebar:
 
     st.subheader("1. 容量设定")
     input_volume = st.number_input("目标有效容积 (m³)", 0.1, 50.0, 4.5, 0.1)
-    # 修改点：默认密度改为 2.8
+    # 默认密度 2.8
     input_density = st.number_input("介质密度 (t/m³)", 1.0, 10.0, 2.8, 0.1)
 
     st.subheader("2. 形状控制 (D/H)")
@@ -109,7 +109,7 @@ with st.sidebar:
     st.number_input("精调数值", 0.5, 2.5, key='input_val', value=st.session_state.aspect_ratio, step=0.01, on_change=update_from_input)
     
     st.subheader("3. 结构细节 (mm)")
-    # 修改点：默认净空改为 150
+    # 默认净空 150
     input_freeboard = st.number_input("净空高度 (液面到顶)", value=150, step=50)
     input_angle = st.number_input("侧壁倾角 (°)", value=5.0, step=0.5)
     input_wall_thick = st.number_input("侧壁总厚度", value=160, step=10)
@@ -146,8 +146,8 @@ def solve_ladle(target_vol, density, t_wall, t_bot, freeboard, angle, ar):
     D_bot = D_top - 2 * H_mm * tan_a
     h_liq = H_mm - t_bot - freeboard
     
-    # 耳轴高度估算 (通常位于总高 0.6-0.65 处，保证倾翻稳定性)
-    trunnion_h = H_mm * 0.65
+    # 修改点：耳轴高度改为 70%
+    trunnion_h = H_mm * 0.70
 
     return {
         "H": H_mm, "Dt": D_top, "Db": D_bot, "hl": h_liq,
@@ -225,8 +225,8 @@ with c2:
         ax.add_patch(patches.Polygon(list(zip(liq_x, liq_y)), closed=True, fc='#D32F2F', alpha=0.9, label='铁水'))
 
     # --- 专业标注 ---
-    # 中心线
-    ax.plot([0, 0], [-400, H+400], 'k-.', lw=1, alpha=0.5)
+    # 移除中心线代码 (按要求)
+    # ax.plot([0, 0], [-400, H+400], 'k-.', lw=1, alpha=0.5) 
     
     bbox_style = dict(boxstyle='square,pad=0.2', fc='white', ec='none', alpha=0.9)
     arrow_style = dict(arrowstyle='<|-|>', lw=1.5, color='black')
@@ -252,7 +252,7 @@ with c2:
     ax.plot([Dt/2, dim_x], [0, 0], **ext_line_style)
     ax.plot([Db/2, dim_x], [tb, tb], **ext_line_style)
     
-    # (2) 有效容深度 (改名)
+    # (2) 有效容深度
     ax.annotate("", xy=(dim_x, tb), xytext=(dim_x, tb+h_l), arrowprops=arrow_style)
     ax.text(dim_x + 50, tb + h_l/2, f"有效容深度 {h_l:.0f}", va='center', ha='left', fontsize=10, fontweight='bold', color='#D32F2F')
     ax.plot([r_liq_t, dim_x], [tb+h_l, tb+h_l], **ext_line_style)
@@ -262,7 +262,7 @@ with c2:
     ax.text(dim_x + 50, tb+h_l + hf/2, f"净空 {hf:.0f}", va='center', ha='left', fontsize=10, color='blue')
     ax.plot([Dt/2, dim_x], [H, H], **ext_line_style)
 
-    # 3. 耳轴位置标注 (Trunnion)
+    # 3. 耳轴位置标注 (Trunnion) - 蓝色十字
     ax.plot(0, z_trunnion, marker='$\oplus$', markersize=15, color='blue') # 耳轴符号
     ax.annotate(f"耳轴中心 H={z_trunnion:.0f}", xy=(0, z_trunnion), xytext=(-Dt/3, z_trunnion), 
                 arrowprops=dict(arrowstyle='->', color='blue'), color='blue', fontweight='bold', bbox=bbox_style)
