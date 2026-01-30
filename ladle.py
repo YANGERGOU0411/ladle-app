@@ -144,9 +144,28 @@ def solve_ladle(target_vol, density, t_wall, t_bot, freeboard, angle, ar):
     D_bot = D_top - 2 * H_mm * tan_a
     h_liq = H_mm - t_bot - freeboard
     
+    # --- 重心计算 (圆台重心公式) ---
+    # 铁水液面的上半径和下半径
+    r_liq_top = (D_top/2 - freeboard * tan_a) - t_wall
+    r_liq_bot = (D_bot/2 + t_bot * tan_a) - t_wall
+    
+    # 铁水部分高度 h_liq
+    h = h_liq
+    R = r_liq_top
+    r = r_liq_bot
+    
+    if r > 0 and h > 0:
+        # 重心相对于液柱底面的高度
+        z_liq_local = (h * (R**2 + 2*R*r + 3*r**2)) / (4 * (R**2 + R*r + r**2))
+        # 绝对重心高度 (相对于包底)
+        z_cog = input_bottom_thick + z_liq_local
+    else:
+        z_cog = 0
+
     return {
         "H": H_mm, "Dt": D_top, "Db": D_bot, "hl": h_liq,
-        "cap": target_vol * density, "vol": target_vol
+        "cap": target_vol * density, "vol": target_vol,
+        "z_cog": z_cog
     }
 
 res = solve_ladle(input_volume, input_density, input_wall_thick, input_bottom_thick, input_freeboard, input_angle, st.session_state.aspect_ratio)
@@ -166,7 +185,7 @@ with c1:
     k2.metric("上口外径", f"{res['Dt']:.0f} mm")
     k3, k4 = st.columns(2)
     k3.metric("计算载重", f"{res['cap']:.2f} t")
-    k4.metric("液面深度", f"{res['hl']:.0f} mm")
+    k4.metric("铁水重心高度", f"{res['z_cog']:.0f} mm")
     
     st.markdown("#### 📥 导出数据")
     df = pd.DataFrame([
@@ -175,6 +194,8 @@ with c1:
         ["下底外径", f"{res['Db']:.0f}", "mm"],
         ["有效容积", f"{res['vol']:.2f}", "m³"],
         ["计算载重", f"{res['cap']:.2f}", "t"],
+        ["有效容深度", f"{res['hl']:.0f}", "mm"],
+        ["铁水重心高度", f"{res['z_cog']:.0f}", "mm"],
         ["侧壁厚度", f"{input_wall_thick}", "mm"],
         ["底部厚度", f"{input_bottom_thick}", "mm"],
         ["侧壁倾角", f"{input_angle}", "°"],
@@ -190,84 +211,77 @@ with c2:
     H, Dt, Db = res['H'], res['Dt'], res['Db']
     hf = input_freeboard
     tw, tb = input_wall_thick, input_bottom_thick
-    tan_a = tan(radians(input_angle))
+    z_cog = res['z_cog']
     
-    fig, ax = plt.subplots(figsize=(10, 8)) # 加大画布以便标注
+    fig, ax = plt.subplots(figsize=(10, 8))
     
     # --- 几何计算 ---
-    # 外形点
+    tan_a = tan(radians(input_angle))
     out_x = [-Db/2, Db/2, Dt/2, -Dt/2]
     out_y = [0, 0, H, H]
-    # 内腔点（内衬表面）
     r_in_b = (Db/2) + tb*tan_a - tw
     r_in_t = (Dt/2) - tw
     in_x = [-r_in_b, r_in_b, r_in_t, -r_in_t]
     in_y = [tb, tb, H, H]
-    # 铁水点
     h_l = H - tb - hf
     r_liq_t = (Dt/2) - hf*tan_a - tw
     liq_x = [-r_in_b, r_in_b, r_liq_t, -r_liq_t]
     liq_y = [tb, tb, tb+h_l, tb+h_l]
 
     # --- 绘图图层 ---
-    # 1. 保温/耐材层 (黄色背景) - 画整个外形，填充黄色
+    # 1. 保温层 (黄色)
     ax.add_patch(patches.Polygon(list(zip(out_x, out_y)), closed=True, fc='#FFEC8B', ec='black', lw=2, label='保温/耐材'))
-    # 2. 内腔空区 (白色遮罩) - 将内腔填充白色，盖住黄色
+    # 2. 内腔 (白色)
     ax.add_patch(patches.Polygon(list(zip(in_x, in_y)), closed=True, fc='white', ec='black', lw=1))
-    # 3. 铁水层 (红色填充)
+    # 3. 铁水 (红色)
     if r_in_b > 0 and h_l > 0:
         ax.add_patch(patches.Polygon(list(zip(liq_x, liq_y)), closed=True, fc='#D32F2F', alpha=0.9, label='铁水'))
 
-    # --- 专业标注 (整齐好看) ---
+    # --- 专业标注 ---
     # 中心线
     ax.plot([0, 0], [-400, H+400], 'k-.', lw=1, alpha=0.5)
     
-    # 样式定义
     bbox_style = dict(boxstyle='square,pad=0.2', fc='white', ec='none', alpha=0.9)
     arrow_style = dict(arrowstyle='<|-|>', lw=1.5, color='black')
     ext_line_style = dict(color='black', lw=0.5)
 
-    # 1. 总高度 H
+    # 1. 总高 & 外径
     ax.annotate("", xy=(-Dt/2 - 250, 0), xytext=(-Dt/2 - 250, H), arrowprops=arrow_style)
     ax.text(-Dt/2 - 300, H/2, f"H={H:.0f}", ha='right', va='center', fontweight='bold')
-    ax.plot([-Dt/2, -Dt/2-250], [0, 0], **ext_line_style) # 延长线
+    ax.plot([-Dt/2, -Dt/2-250], [0, 0], **ext_line_style)
     ax.plot([-Dt/2, -Dt/2-250], [H, H], **ext_line_style)
 
-    # 2. 上口外径 Dt
     ax.annotate("", xy=(-Dt/2, H+250), xytext=(Dt/2, H+250), arrowprops=arrow_style)
     ax.text(0, H+300, f"Ф{Dt:.0f}", ha='center', va='bottom', fontweight='bold', bbox=bbox_style)
     ax.plot([-Dt/2, -Dt/2], [H, H+250], **ext_line_style)
     ax.plot([Dt/2, Dt/2], [H, H+250], **ext_line_style)
 
-    # 3. 下底外径 Db
-    ax.annotate("", xy=(-Db/2, -250), xytext=(Db/2, -250), arrowprops=arrow_style)
-    ax.text(0, -300, f"Ф{Db:.0f}", ha='center', va='top', fontweight='bold', bbox=bbox_style)
-    ax.plot([-Db/2, -Db/2], [0, -250], **ext_line_style)
-    ax.plot([Db/2, Db/2], [0, -250], **ext_line_style)
+    # 2. 链式对齐标注 (右侧) --- 您的核心需求
+    dim_x = Dt/2 + 300 # 统一标注线位置
+    
+    # (1) 底厚
+    ax.annotate("", xy=(dim_x, 0), xytext=(dim_x, tb), arrowprops=arrow_style)
+    ax.text(dim_x + 50, tb/2, f"底厚 {tb:.0f}", va='center', ha='left', fontsize=10)
+    ax.plot([Dt/2, dim_x], [0, 0], **ext_line_style)
+    ax.plot([Db/2, dim_x], [tb, tb], **ext_line_style) # 引出线
+    
+    # (2) 有效容深度
+    ax.annotate("", xy=(dim_x, tb), xytext=(dim_x, tb+h_l), arrowprops=arrow_style)
+    ax.text(dim_x + 50, tb + h_l/2, f"有效容深度 {h_l:.0f}", va='center', ha='left', fontsize=10, fontweight='bold', color='#D32F2F')
+    ax.plot([r_liq_t, dim_x], [tb+h_l, tb+h_l], **ext_line_style)
+    
+    # (3) 净空
+    ax.annotate("", xy=(dim_x, tb+h_l), xytext=(dim_x, H), arrowprops=arrow_style)
+    ax.text(dim_x + 50, tb+h_l + hf/2, f"净空 {hf:.0f}", va='center', ha='left', fontsize=10, color='blue')
+    ax.plot([Dt/2, dim_x], [H, H], **ext_line_style)
 
-    # 4. 液面与净空
-    if h_l > 0:
-        # 液面线
-        ax.plot([-r_liq_t*1.3, r_liq_t*1.3], [tb+h_l, tb+h_l], 'r--', lw=1.5)
-        ax.text(r_liq_t*1.4, tb+h_l, "液面 ▼", color='red', va='center', fontweight='bold')
-        # 液深标注
-        ax.annotate("", xy=(0, tb), xytext=(0, tb+h_l), arrowprops=dict(arrowstyle='<->', color='red', lw=2))
-        ax.text(0, tb + h_l/2, f"液深 {h_l:.0f}", ha='center', color='white', fontweight='bold', bbox=dict(fc='#D32F2F', ec='none', alpha=0.8))
-        # 净空标注
-        ax.annotate("", xy=(r_liq_t, tb+h_l), xytext=(r_liq_t, H), arrowprops=dict(arrowstyle='<->', color='blue', lw=1.5))
-        ax.text(r_liq_t+30, H - hf/2, f"净空 {hf:.0f}", color='blue', va='center', bbox=bbox_style)
+    # 3. 重心标注 (COG)
+    if z_cog > 0:
+        ax.plot(0, z_cog, marker='$\oplus$', markersize=15, color='blue') # 重心符号
+        ax.annotate(f"重心 H={z_cog:.0f}", xy=(0, z_cog), xytext=(-Dt/3, z_cog), 
+                    arrowprops=dict(arrowstyle='->', color='blue'), color='blue', fontweight='bold', bbox=bbox_style)
 
-    # 5. 厚度引出标注
-    ax.annotate(f"壁厚 {tw}", xy=(Dt/2, H*0.7), xytext=(Dt/2+350, H*0.7), arrowprops=dict(arrowstyle='->'), va='center', bbox=bbox_style)
-    ax.annotate(f"底厚 {tb}", xy=(Db/4, tb/2), xytext=(Db/2+350, tb/2), arrowprops=dict(arrowstyle='->'), va='center', bbox=bbox_style)
-
-    # 图表设置
     ax.set_aspect('equal')
     ax.axis('off')
-    ax.set_title(f"铁水包总装结构图 (有效容积 V={input_volume}m³)", y=-0.1, fontsize=14, fontweight='bold')
-    # 图例优化
-    legend = ax.legend(loc='upper right', frameon=True, fancybox=True, framealpha=0.9, shadow=True)
-    for text in legend.get_texts():
-        text.set_fontweight('bold')
-
+    ax.set_title(f"铁水包总装图 (V={input_volume}m³)", y=-0.1, fontsize=14, fontweight='bold')
     st.pyplot(fig)
