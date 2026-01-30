@@ -66,15 +66,20 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
 
-# --- 解决字体 ---
-try:
-    if os.path.exists("SimHei.ttf"):
-        fm.fontManager.addfont("SimHei.ttf")
-        plt.rcParams['font.sans-serif'] = ['SimHei']
-    else:
-        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
-except:
-    pass
+# --- 解决字体 (高速缓存版) ---
+@st.cache_resource
+def load_fonts():
+    # 这个函数只会运行一次，下次会自动从内存调取，速度极快
+    try:
+        if os.path.exists("SimHei.ttf"):
+            fm.fontManager.addfont("SimHei.ttf")
+            return ['SimHei']
+        else:
+            return ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']
+    except:
+        return ['sans-serif']
+
+plt.rcParams['font.sans-serif'] = load_fonts()
 plt.rcParams['axes.unicode_minus'] = False
 
 # --- 状态同步 ---
